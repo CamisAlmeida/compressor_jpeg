@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
 import math
+import matplotlib.pyplot as plt
 
 # Entrada da imagem 
 INPUT_FILE = 'foto1.jpeg'
@@ -171,10 +172,9 @@ print(Q)
 # Fator de escala
 s = [0.5, 1, 2, 4]
 
-# Intensidade de quntização
-Qs = s[1] * Q
 
-# Armazena os coeficientes quantizados
+Qs = s[1] * Q # Intensidade de quntização
+
 Fq_blocos = np.zeros_like(F_blocos, dtype=np.int32)
 
 # Percorre todos os blocos
@@ -183,10 +183,7 @@ for i in range(numBlocosAltura):
 
         # Coeficientes DCT do bloco
         F = F_blocos[i, j]
-
         Fq = np.round(F / Qs)
-
-        # Armazena os coeficientes quantizados
         Fq_blocos[i, j] = Fq.astype(np.int32)
 
 print("Tabela Q:")
@@ -197,3 +194,223 @@ print(Qs)
 
 print("Primeiro bloco quantizado:")
 print(Fq_blocos[0, 0])
+
+# Parte 4 - Varredura Zig-Zag
+
+ordem_zigzag = []
+
+N = 8
+
+for diagonal in range(2 * N - 1):
+    linha_min = max(0, diagonal - (N - 1))
+    linha_max = min(N - 1, diagonal)
+
+    if diagonal % 2 == 0:
+        linhas = range(linha_max, linha_min - 1, -1)
+    else:
+        linhas = range(linha_min, linha_max + 1)
+
+    for linha in linhas:
+        coluna = diagonal - linha
+        ordem_zigzag.append((linha, coluna))
+
+# Armazena as sequências zig-zag de todos os blocos
+zigzag_blocos = np.zeros(
+    (numBlocosAltura, numBlocosLargura, 64),
+    dtype=np.int32
+)
+
+# Percorre todos os blocos quantizados
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+
+        Fq = Fq_blocos[i, j]
+
+        # Reorganiza os 64 coeficientes na ordem zig-zag
+        for k, (linha, coluna) in enumerate(ordem_zigzag):
+            zigzag_blocos[i, j, k] = Fq[linha, coluna]
+
+print("Primeiras posições zig-zag:")
+print(ordem_zigzag[:10])
+
+print("Primeiro bloco em ordem zig-zag:")
+print(zigzag_blocos[0, 0])
+
+
+
+# Parte 5 - Codificação RLE
+
+# 5.1 RLE mínimo sugerido
+rle_blocos = []
+
+for i in range(numBlocosAltura):
+    linha_rle = []
+
+    for j in range(numBlocosLargura):
+        vetor = zigzag_blocos[i, j]
+
+        run = 0
+        codificacao = []
+
+        for valor in vetor:
+            if valor == 0:
+                run += 1
+            else:
+                codificacao.append((run, int(valor)))
+                run = 0
+
+        # Finaliza a codificação do bloco
+        codificacao.append("EOB")
+
+        linha_rle.append(codificacao)
+
+    rle_blocos.append(linha_rle)
+
+print("Codificação RLE do primeiro bloco:")
+print(rle_blocos[0][0])
+
+# 5.2 Bits por pixel
+# Contagem dos bits da representação RLE
+
+totalBits = 0
+totalPares = 0
+totalEOB = 0
+
+for linha_rle in rle_blocos:
+    for codificacao in linha_rle:
+        # Cada item é um par ou o marcador EOB
+        pares = len(codificacao) - 1
+
+        totalPares += pares
+        totalEOB += 1
+
+        totalBits += pares * 24
+        totalBits += 8  # EOB
+
+print("Total de pares:", totalPares)
+print("Total de marcadores EOB:", totalEOB)
+print("Total de bits comprimidos:", totalBits)
+
+
+totalPixels = altura * largura
+bpp = totalBits / totalPixels
+
+print("Total de pixels:", totalPixels)
+print("BPP da imagem:", bpp)
+print("BPP original sem compressão: 8")
+
+# 6 Procedimento inverso
+
+# 6.1 Desquantização
+
+# Parte 6.1 - Decodificação RLE
+vetores_recuperados = []
+
+for i in range(numBlocosAltura):
+    linha_vetores = []
+
+    for j in range(numBlocosLargura):
+        codificacao = rle_blocos[i][j]
+        vetor = []
+
+        for item in codificacao:
+            if item == "EOB":
+                break
+
+            run, valor = item
+
+            # Recupera os zeros anteriores ao valor
+            vetor.extend([0] * run)
+
+            # Recupera o coeficiente não nulo
+            vetor.append(valor)
+
+        # Completa os zeros que faltam até 64 posições
+        vetor.extend([0] * (64 - len(vetor)))
+
+        linha_vetores.append(vetor)
+
+    vetores_recuperados.append(linha_vetores)
+
+print("Vetor recuperado do primeiro bloco:")
+print(vetores_recuperados[0][0])
+print("Quantidade de elementos:", len(vetores_recuperados[0][0]))
+
+
+Fq_recuperados = np.zeros(
+    (numBlocosAltura, numBlocosLargura, 8, 8),
+    dtype=np.int32
+)
+
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+        vetor = vetores_recuperados[i][j]
+
+        for k, (linha, coluna) in enumerate(ordem_zigzag):
+            Fq_recuperados[i, j, linha, coluna] = vetor[k]
+
+print("Matriz recuperada do primeiro bloco:")
+print(Fq_recuperados[0, 0])
+
+
+# 6.2 IDCT matricial
+
+Qs = s[1] * Q
+
+F_desquantizados = np.zeros(
+    (numBlocosAltura, numBlocosLargura, 8, 8),
+    dtype=np.float64
+)
+
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+        F_desquantizados[i, j] = Fq_recuperados[i, j] * Qs
+
+print("Coeficientes desquantizados do primeiro bloco:")
+print(F_desquantizados[0, 0])
+
+blocos_reconstruidos = np.zeros(
+    (numBlocosAltura, numBlocosLargura, 8, 8),
+    dtype=np.float64
+)
+
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+        F = F_desquantizados[i, j]
+
+        blocos_reconstruidos[i, j] = C.T @ F @ C
+
+#Desfazer o deslocamento
+blocos_reconstruidos += 128
+
+blocos_reconstruidos = np.clip(
+    np.rint(blocos_reconstruidos),
+    0,
+    255
+).astype(np.uint8)
+
+#Montagem da imagem reconstruída
+altura_padded = numBlocosAltura * 8
+largura_padded = numBlocosLargura * 8
+
+Y_reconstruida_padded = np.zeros(
+    (altura_padded, largura_padded),
+    dtype=np.uint8
+)
+
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+        inicio_linha = i * 8
+        inicio_coluna = j * 8
+
+        Y_reconstruida_padded[
+            inicio_linha:inicio_linha + 8,
+            inicio_coluna:inicio_coluna + 8
+        ] = blocos_reconstruidos[i, j]
+
+# Remover o padding e recuperar o tamanho original
+Y_reconstruida = Y_reconstruida_padded[:altura, :largura]
+
+# Criar e salvar a imagem
+imgCinza = Image.fromarray(Y_reconstruida)
+imgCinza.save(OUTPUT_FILE)
