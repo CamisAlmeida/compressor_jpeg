@@ -132,3 +132,68 @@ print("Matriz da DCT (8x8):")
 print(C)
 
 print("Dimensões da matriz:", C.shape)
+
+# 2.2 DCT 2D
+
+F_blocos = np.zeros_like(blocos, dtype=np.float64)
+
+# Aplicar a DCT 2D em cada bloco
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+        bloco = blocos[i, j]
+        F_blocos[i, j] = C @ bloco @ C.T
+
+
+print("Formato dos blocos transformados:", F_blocos.shape)
+print("Primeiro bloco antes da DCT:")
+print(blocos[0, 0])
+print("Primeiro bloco depois da DCT:")
+print(F_blocos[0, 0])
+
+# 3 Quantização
+
+Q = np.array([
+[16, 11, 10, 16, 24, 40, 51, 61],
+[12, 12, 14, 19, 26, 58, 60, 55],
+[14, 13, 16, 24, 40, 57, 69, 56],
+[14, 17, 22, 29, 51, 87, 80, 62],
+[18, 22, 37, 56, 68, 109, 103, 77],
+[24, 35, 55, 64, 81, 104, 113, 92],
+[49, 64, 78, 87,103, 121, 120, 101],
+[72, 92, 95, 98,112, 100, 103, 99]
+], dtype=np.float64)
+
+print("Matriz de Quantização (Q):")
+print(Q)
+
+# Parte 3 - Quantização
+
+# Fator de escala
+s = [0.5, 1, 2, 4]
+
+# Intensidade de quntização
+Qs = s[1] * Q
+
+# Armazena os coeficientes quantizados
+Fq_blocos = np.zeros_like(F_blocos, dtype=np.int32)
+
+# Percorre todos os blocos
+for i in range(numBlocosAltura):
+    for j in range(numBlocosLargura):
+
+        # Coeficientes DCT do bloco
+        F = F_blocos[i, j]
+
+        Fq = np.round(F / Qs)
+
+        # Armazena os coeficientes quantizados
+        Fq_blocos[i, j] = Fq.astype(np.int32)
+
+print("Tabela Q:")
+print(Q)
+
+print("Tabela Qs:")
+print(Qs)
+
+print("Primeiro bloco quantizado:")
+print(Fq_blocos[0, 0])
