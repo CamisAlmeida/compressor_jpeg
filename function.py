@@ -2,21 +2,6 @@ import numpy as np
 from PIL import Image
 import math
 import matplotlib.pyplot as plt
-from skimage.metrics import structural_similarity
-
-# Entrada da imagem 
-INPUT_FILE = 'foto1.jpeg'
-OUTPUT_GRAY_FILE = 'foto1Cinza.png' # arquivo de saida da imagem cinza
-OUTPUT_FILE = 'foto1Processada.png' # arquivo de saida da imagem procesada
-
-
-matrizBase = np.array([
-    [ 0.299000,  0.587000,  0.114000],
-    [ 0.500000, -0.418688, -0.081312],
-    [-0.168736, -0.331264,  0.500000]
-], dtype=np.float64)
-
-deslocamento = np.array([0, 128, 128], dtype=np.float64)
 
 # Recebe uma imagem de entrada, converte para YCrCb e salva a imagem em tons de cinza
 def rgb_to_ycrcb(input, output, matrizBase, deslocamento):
@@ -45,9 +30,6 @@ def rgb_to_ycrcb(input, output, matrizBase, deslocamento):
     print("Tipo dos dados:", ycrcb.dtype)
     print("Primeiro pixel de YCrCb:", ycrcb[0, 0])
     return ycrcb
-
-
-ycrcb = rgb_to_ycrcb(INPUT_FILE, OUTPUT_GRAY_FILE, matrizBase, deslocamento)
 
 
 def divide_blocks(ycrcb, block_size=8):
@@ -99,7 +81,7 @@ def divide_blocks(ycrcb, block_size=8):
     print("Primeiro bloco 8x8:")
     print(blocos[0, 0])
 
-    return blocos, numBlocosAltura, numBlocosLargura, altura, largura
+    return blocos, Y, numBlocosAltura, numBlocosLargura, altura, largura
     
 
 # 2 Versão A - DCT 2D pela operação matricial
@@ -127,17 +109,15 @@ def matrix_dct(blockSize=8):
                 (math.pi / N) * (n + 0.5) * k
             )
 
-    print("Matriz da DCT (8x8):")
-    print(C)
-
-    print("Dimensões da matriz:", C.shape)
     return C
 
 # 2.2 DCT 2D
 
 def apply_dct(ycrcb, blockSize=8):
-    blocos, numBlocosAltura, numBlocosLargura, altura, largura = divide_blocks(ycrcb)
+    blocos, Y, numBlocosAltura, numBlocosLargura, altura, largura = divide_blocks(ycrcb)
     C = matrix_dct(blockSize=8)
+    print("Matriz da DCT (C):")
+    print(C)
     F_blocos = np.zeros_like(blocos, dtype=np.float64)
 
     # Aplicar a DCT 2D em cada bloco
@@ -145,44 +125,19 @@ def apply_dct(ycrcb, blockSize=8):
         for j in range(numBlocosLargura):
             bloco = blocos[i, j]
             F_blocos[i, j] = C @ bloco @ C.T
-    return F_blocos, blocos, numBlocosAltura, numBlocosLargura, altura, largura
-   
-F_blocos, blocos, numBlocosAltura, numBlocosLargura, altura, largura = apply_dct(ycrcb, blockSize=8)
-
-print("Formato dos blocos transformados:", F_blocos.shape)
-print("Primeiro bloco antes da DCT:")
-print(blocos[0, 0])
-print("Primeiro bloco depois da DCT:")
-print(F_blocos[0, 0])
+    return F_blocos, blocos, Y, numBlocosAltura, numBlocosLargura, altura, largura
 
 # 3 Quantização
 
-Q = np.array([
-[16, 11, 10, 16, 24, 40, 51, 61],
-[12, 12, 14, 19, 26, 58, 60, 55],
-[14, 13, 16, 24, 40, 57, 69, 56],
-[14, 17, 22, 29, 51, 87, 80, 62],
-[18, 22, 37, 56, 68, 109, 103, 77],
-[24, 35, 55, 64, 81, 104, 113, 92],
-[49, 64, 78, 87,103, 121, 120, 101],
-[72, 92, 95, 98,112, 100, 103, 99]
-], dtype=np.float64)
-
-print("Matriz de Quantização (Q):")
-print(Q)
-
-# Fator de escala
-s = [0.5, 1, 2, 4]
-
-def quantization(F_blocos, Q, s):
+def quantization(F_blocos, Q, s, heightBlocks, widthBlocks,):
 
     Qs = s * Q # Intensidade de quntização
 
     Fq_blocos = np.zeros_like(F_blocos, dtype=np.int32)
 
     # Percorre todos os blocos
-    for i in range(numBlocosAltura):
-        for j in range(numBlocosLargura):
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
 
             # Coeficientes DCT do bloco
             F = F_blocos[i, j]
@@ -191,13 +146,8 @@ def quantization(F_blocos, Q, s):
     return Fq_blocos, Qs
 
 
-Fq_blocos, Qs = quantization(F_blocos, Q, s[1]) 
-
-print("Primeiro bloco quantizado:")
-print(Fq_blocos[0, 0])
-
 # Parte 4  Varredura Zig-Zag
-def zigZag_Scan(blockSize, Fq_blocos, ordem_zigzag):
+def zigZag_Scan(blockSize, Fq_blocos, heightBlocks, widthBlocks,):
     ordem_zigzag = []
 
     N = blockSize
@@ -217,13 +167,13 @@ def zigZag_Scan(blockSize, Fq_blocos, ordem_zigzag):
 
     # Armazena as sequências zig-zag de todos os blocos
     zigzag_blocos = np.zeros(
-        (numBlocosAltura, numBlocosLargura, 64),
+        (heightBlocks, widthBlocks, 64),
         dtype=np.int32
     )
 
     # Percorre todos os blocos quantizados
-    for i in range(numBlocosAltura):
-        for j in range(numBlocosLargura):
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
 
             Fq = Fq_blocos[i, j]
 
@@ -233,13 +183,6 @@ def zigZag_Scan(blockSize, Fq_blocos, ordem_zigzag):
 
     return zigzag_blocos, ordem_zigzag
 
-zigzag_blocos, ordem_zigzag = zigZag_Scan(8, Fq_blocos, ordem_zigzag=[])
-
-print("Primeiras posições zig-zag:")
-print(ordem_zigzag[:10])
-
-print("Primeiro bloco em ordem zig-zag:")
-print(zigzag_blocos[0, 0])
 
 # Parte 5  Codificação RLE
 
@@ -254,27 +197,23 @@ def rle(heightBlocks, widthBlocks, zigzag_Blocks):
             vetor = zigzag_Blocks[i, j]
 
             run = 0
-            codificacao = []
+            cod = []
 
             for valor in vetor:
                 if valor == 0:
                     run += 1
                 else:
-                    codificacao.append((run, int(valor)))
+                    cod.append((run, int(valor)))
                     run = 0
 
             # Finaliza a codificação do bloco
-            codificacao.append("EOB")
+            cod.append("EOB")
 
-            linha_rle.append(codificacao)
+            linha_rle.append(cod)
 
         rle_blocks.append(linha_rle)
     return rle_blocks
 
-rle_blocos = rle(numBlocosAltura, numBlocosLargura, zigzag_blocos)
-
-print("Codificação RLE do primeiro bloco:")
-print(rle_blocos[0][0])
 
 # 5.2 Bits por pixel
 # Contagem dos bits da representação RLE
@@ -297,161 +236,144 @@ def counter_rle(rle_blocks):
             totalBits += 8  # EOB
     return totalBits, totalPares, totalEOB
 
-totalBits, totalPares, totalEOB = counter_rle(rle_blocos)
-
-print("Total de pares:", totalPares)
-print("Total de marcadores EOB:", totalEOB)
-print("Total de bits comprimidos:", totalBits)
-
-totalPixels = altura * largura
-bpp = totalBits / totalPixels
-
-print("Total de pixels:", totalPixels)
-print("BPP da imagem:", bpp)
-print("BPP original sem compressão: 8")
 
 # 6 Procedimento inverso
 
 # 6.1 Desquantização
 
 # Parte 6.1 - Decodificação RLE
-vetores_recuperados = []
 
-for i in range(numBlocosAltura):
-    linha_vetores = []
+def decode_rle(rle_blocks, heightBlocks, widthBlocks):
+        
+    recovered_vector = []
 
-    for j in range(numBlocosLargura):
-        codificacao = rle_blocos[i][j]
-        vetor = []
+    for i in range(heightBlocks):
+        line_vector = []
 
-        for item in codificacao:
-            if item == "EOB":
-                break
+        for j in range(widthBlocks):
+            cod = rle_blocks[i][j]
+            vector = []
 
-            run, valor = item
+            for item in cod:
+                if item == "EOB":
+                    break
 
-            # Recupera os zeros anteriores ao valor
-            vetor.extend([0] * run)
+                run, value = item
 
-            # Recupera o coeficiente não nulo
-            vetor.append(valor)
+                # Recupera os zeros anteriores ao valor
+                vector.extend([0] * run)
 
-        # Completa os zeros que faltam até 64 posições
-        vetor.extend([0] * (64 - len(vetor)))
+                # Recupera o coeficiente não nulo
+                vector.append(value)
 
-        linha_vetores.append(vetor)
+            # Completa os zeros que faltam até 64 posições
+            vector.extend([0] * (64 - len(vector)))
 
-    vetores_recuperados.append(linha_vetores)
+            line_vector.append(vector)
 
-print("Vetor recuperado do primeiro bloco:")
-print(vetores_recuperados[0][0])
-print("Quantidade de elementos:", len(vetores_recuperados[0][0]))
+        recovered_vector .append(line_vector)
+    return recovered_vector
 
+def reconstruct_Fq(vetores_recuperados, ordem_zigzag,  heightBlocks, widthBlocks):
 
-Fq_recuperados = np.zeros(
-    (numBlocosAltura, numBlocosLargura, 8, 8),
-    dtype=np.int32
-)
+    Fq_recuperados = np.zeros(
+        (heightBlocks, widthBlocks, 8, 8),
+        dtype=np.int32
+    )
 
-for i in range(numBlocosAltura):
-    for j in range(numBlocosLargura):
-        vetor = vetores_recuperados[i][j]
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
+            vetor = vetores_recuperados[i][j]
 
-        for k, (linha, coluna) in enumerate(ordem_zigzag):
-            Fq_recuperados[i, j, linha, coluna] = vetor[k]
-
-print("Matriz recuperada do primeiro bloco:")
-print(Fq_recuperados[0, 0])
-
+            for k, (linha, coluna) in enumerate(ordem_zigzag):
+                Fq_recuperados[i, j, linha, coluna] = vetor[k]
+    return Fq_recuperados
 
 # 6.2 IDCT matricial
 
-Qs = s[1] * Q
+def apply_idct(Fq_recuperados, Q, s, heightBlocks, widthBlocks):
 
-F_desquantizados = np.zeros(
-    (numBlocosAltura, numBlocosLargura, 8, 8),
-    dtype=np.float64
-)
+    Qs = s * Q
 
-for i in range(numBlocosAltura):
-    for j in range(numBlocosLargura):
-        F_desquantizados[i, j] = Fq_recuperados[i, j] * Qs
+    F_desquantizados = np.zeros(
+        (heightBlocks, widthBlocks, 8, 8),
+        dtype=np.float64
+    )
 
-print("Coeficientes desquantizados do primeiro bloco:")
-print(F_desquantizados[0, 0])
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
+            F_desquantizados[i, j] = Fq_recuperados[i, j] * Qs
 
-blocos_reconstruidos = np.zeros(
-    (numBlocosAltura, numBlocosLargura, 8, 8),
-    dtype=np.float64
-)
+    print("Coeficientes desquantizados do primeiro bloco:")
+    print(F_desquantizados[0, 0])
+    return F_desquantizados
 
-for i in range(numBlocosAltura):
-    for j in range(numBlocosLargura):
-        F = F_desquantizados[i, j]
 
-        blocos_reconstruidos[i, j] = C.T @ F @ C
+def reconstruct_blocks(F_desquantizados, C, heightBlocks, widthBlocks):
+    blocos_reconstruidos = np.zeros(
+        (heightBlocks, widthBlocks, 8, 8),
+        dtype=np.float64
+    )
 
-#Desfazer o deslocamento
-blocos_reconstruidos += 128
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
+            F = F_desquantizados[i, j]
 
-blocos_reconstruidos = np.clip(
-    np.rint(blocos_reconstruidos),
-    0,
-    255
-).astype(np.uint8)
+            blocos_reconstruidos[i, j] = C.T @ F @ C
+    
+    #Desfazer o deslocamento
+    blocos_reconstruidos += 128
 
-#Montagem da imagem reconstruída
-altura_padded = numBlocosAltura * 8
-largura_padded = numBlocosLargura * 8
+    return blocos_reconstruidos
 
-Y_reconstruida_padded = np.zeros(
-    (altura_padded, largura_padded),
-    dtype=np.uint8
-)
+def reconstruct_image(blocos_reconstruidos, heightBlocks, widthBlocks, height, width, output):
 
-for i in range(numBlocosAltura):
-    for j in range(numBlocosLargura):
-        inicio_linha = i * 8
-        inicio_coluna = j * 8
+    blocos_reconstruidos = np.clip(
+        np.rint(blocos_reconstruidos),
+        0,
+        255
+    ).astype(np.uint8)
 
-        Y_reconstruida_padded[
-            inicio_linha:inicio_linha + 8,
-            inicio_coluna:inicio_coluna + 8
-        ] = blocos_reconstruidos[i, j]
+    #Montagem da imagem reconstruída
+    height_padded = heightBlocks * 8
+    width_padded = widthBlocks * 8
 
-# Remover o padding e recuperar o tamanho original
-Y_reconstruida = Y_reconstruida_padded[:altura, :largura]
+    Y_reconstruida_padded = np.zeros(
+        (height_padded, width_padded),
+        dtype=np.uint8
+    )
 
-# Criar e salvar a imagem
-imgCinza = Image.fromarray(Y_reconstruida)
-imgCinza.save(OUTPUT_FILE)
+    for i in range(heightBlocks):
+        for j in range(widthBlocks):
+            inicio_linha = i * 8
+            inicio_coluna = j * 8
+
+            Y_reconstruida_padded[
+                inicio_linha:inicio_linha + 8,
+                inicio_coluna:inicio_coluna + 8
+            ] = blocos_reconstruidos[i, j]
+
+    # Remover o padding e recuperar o tamanho original
+    Y_reconstruida = Y_reconstruida_padded[:height, :width]
+
+    # Criar e salvar a imagem
+    imgCinza = Image.fromarray(Y_reconstruida)
+    imgCinza.save(output)
+    return Y_reconstruida
 
 # 7 Métricas de qualidade
 # 7.1 PSNR
 
-original = Y.astype(np.float64)
-reconstruida = Y_reconstruida.astype(np.float64)
+def mse_psnr(original, rebuilt ):
 
-erro = original - reconstruida
-MSE = np.mean(erro ** 2)
+    erro = original - rebuilt
+    MSE = np.mean(erro ** 2)
 
 
-if MSE == 0:
-    PSNR = float("inf")
-else:
-    PSNR = 10 * np.log10((255 ** 2) / MSE)
+    if MSE == 0:
+        PSNR = float("inf")
+    else:
+        PSNR = 10 * np.log10((255 ** 2) / MSE)
 
-print("MSE:", MSE)
-print("PSNR:", PSNR, "dB")
+    return MSE, PSNR
 
-#7.2 SSIM
-
-SSIM = structural_similarity(
-    Y,
-    Y_reconstruida,
-    data_range=255
-)
-
-print("SSIM:", SSIM)
-
-# 8 Curva qualidade × compressão
