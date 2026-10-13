@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 import math
 import matplotlib.pyplot as plt
+from skimage.metrics import structural_similarity
 
 # Recebe uma imagem de entrada, converte para YCrCb e salva a imagem em tons de cinza
 def rgb_to_ycrcb(input, output, matrizBase, deslocamento):
@@ -377,3 +378,123 @@ def mse_psnr(original, rebuilt ):
 
     return MSE, PSNR
 
+
+def executar_jpeg_like(
+    F_blocos,
+    Q,
+    s,
+    Y,
+    heightBlocks, 
+    widthBlocks,
+    height, 
+    width,
+    output
+):
+    #Executa a compressão e a reconstrução da imagem para um valor de s.
+    #Retorna as métricas de compressão e qualidade da imagem reconstruída.
+
+    # 1. Quantização dos coeficientes da DCT
+    Fq_blocos, Qs = quantization(
+        F_blocos,
+        Q,
+        s,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 2. Varredura Zig-Zag dos coeficientes quantizados
+    zigzag_blocos, ordem_zigzag = zigZag_Scan(
+        8,
+        Fq_blocos,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 3. Codificação por comprimento de sequência (RLE)
+    rle_blocos = rle(
+        heightBlocks,
+        widthBlocks,
+        zigzag_blocos
+    )
+
+    # 4. Contagem dos bits da representação RLE
+    totalBits, totalPares, totalEOB = counter_rle(rle_blocos)
+
+    # Bits por pixel (bpp)
+    bpp = totalBits / (height * width)
+
+    # Percentual de coeficientes zerados após a quantização
+    totalCoeficientes = Fq_blocos.size
+    coeficientesZero = np.count_nonzero(Fq_blocos == 0)
+
+    percentualZero = 100 * coeficientesZero / totalCoeficientes
+
+    # 5. Decodificação RLE
+    vetores_recuperados = decode_rle(
+        rle_blocos,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 6. Reconstrução das matrizes de coeficientes quantizados
+    Fq_recuperados = reconstruct_Fq(
+        vetores_recuperados,
+        ordem_zigzag,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 7. Desquantização
+    F_desquantizados = apply_idct(
+        Fq_recuperados,
+        Q,
+        s,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 8. Reconstrução dos blocos pela IDCT
+    C = matrix_dct(blockSize=8)
+
+    blocos_reconstruidos = reconstruct_blocks(
+        F_desquantizados,
+        C,
+        heightBlocks,
+        widthBlocks
+    )
+
+    # 9. Montagem e salvamento da imagem reconstruída
+    Y_reconstruida = reconstruct_image(
+        blocos_reconstruidos,
+        heightBlocks,
+        widthBlocks,
+        height,
+        width,
+        output
+    )
+
+    # 10. Cálculo das métricas de qualidade
+    original = Y.astype(np.float64)
+    reconstruida = Y_reconstruida.astype(np.float64)
+
+    MSE, PSNR = mse_psnr(original, reconstruida)
+
+    SSIM = structural_similarity(
+        Y,
+        Y_reconstruida,
+        data_range=255
+    )
+
+    # 11. Retorno dos resultados
+    return {
+        "s": s,
+        "bpp": bpp,
+        "percentualZero": percentualZero,
+        "MSE": MSE,
+        "PSNR": PSNR,
+        "SSIM": SSIM,
+        "totalBits": totalBits,
+        "totalPares": totalPares,
+        "totalEOB": totalEOB,
+        "imagem": Y_reconstruida
+    }
