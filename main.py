@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 import math
 import matplotlib.pyplot as plt
+from skimage.metrics import structural_similarity
 
 # Entrada da imagem 
 INPUT_FILE = 'foto1.jpeg'
@@ -414,3 +415,33 @@ Y_reconstruida = Y_reconstruida_padded[:altura, :largura]
 # Criar e salvar a imagem
 imgCinza = Image.fromarray(Y_reconstruida)
 imgCinza.save(OUTPUT_FILE)
+
+# 7 Métricas de qualidade
+# 7.1 PSNR
+
+original = Y.astype(np.float64)
+reconstruida = Y_reconstruida.astype(np.float64)
+
+erro = original - reconstruida
+MSE = np.mean(erro ** 2)
+
+
+if MSE == 0:
+    PSNR = float("inf")
+else:
+    PSNR = 10 * np.log10((255 ** 2) / MSE)
+
+print("MSE:", MSE)
+print("PSNR:", PSNR, "dB")
+
+#7.2 SSIM
+
+SSIM = structural_similarity(
+    Y,
+    Y_reconstruida,
+    data_range=255
+)
+
+print("SSIM:", SSIM)
+
+# 8 Curva qualidade × compressão
